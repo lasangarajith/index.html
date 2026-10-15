@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Glove QC Inspector - Complete System</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; user-select: none; }
+        body { background: #090d16; color: #f8fafc; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        
+        header { background: #1e293b; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
+        .title { font-size: 1rem; font-weight: 700; color: #38bdf8; }
+        .badge { font-size: 0.7rem; padding: 4px 10px; border-radius: 12px; background: #334155; color: #94a3b8; font-weight: 600; }
+        
+        .viewport { position: relative; flex: 1; background: #000; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+        #webcam { position: absolute; width: 100%; height: 100%; object-fit: cover; }
+        #hiddenCanvas { display: none; }
+
+        .banner { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 18px; border-radius: 20px; font-size: 0.85rem; font-weight: 800; background: rgba(15, 23, 42, 0.85); border: 1px solid #334155; color: #94a3b8; z-index: 6; text-align: center; white-space: nowrap; }
+        .banner.pass { background: #22c55e; color: #fff; border-color: #4ade80; box-shadow: 0 0 15px rgba(34,197,94,0.6); }
+        .banner.fail { background: #ef4444; color: #fff; border-color: #f87171; box-shadow: 0 0 15px rgba(239,68,68,0.6); }
+
+        .controls { background: #1e293b; padding: 12px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid #334155; z-index: 10; }
+        
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+        .stat-box { background: #090d16; border-radius: 8px; padding: 8px 4px; text-align: center; border: 1px solid #334155; }
+        .stat-val { font-size: 1rem; font-weight: 700; }
+        .stat-lbl { font-size: 0.55rem; color: #94a3b8; text-transform: uppercase; margin-top: 2px; }
+
+        .btn-row { display: flex; gap: 8px; }
+        .btn { flex: 1; padding: 12px; border-radius: 8px; border: none; font-size: 0.85rem; font-weight: 700; cursor: pointer; text-align: center; }
+        .btn-start { background: #38bdf8; color: #090d16; }
+        .btn-capture { background: #3b82f6; color: #fff; display: none; }
+        .btn-test { background: #22c55e; color: #fff; display: none; flex: 1.5; }
+        .btn-reset { background: #475569; color: #fff; max-width: 70px; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="title">🛡️ Glove QC System</div>
+        <div class="badge" id="badge">OFFLINE</div>
+    </header>
+
+    <div class="viewport">
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="hiddenCanvas"></canvas>
+        <div class="banner" id="banner">PRESS START CAMERA</div>
+    </div>
+
+    <div class="controls">
+        <div class="stats">
+            <div class="stat-box">
+                <div class="stat-val" id="matchEl" style="color:#38bdf8;">--%</div>
+                <div class="stat-lbl">Match</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-val" id="totalEl">0</div>
+                <div class="stat-lbl">Total</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-val" id="passEl" style="color:#22c55e;">0</div>
+                <div class="stat-lbl">Pass</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-val" id="failEl" style="color:#ef4444;">0</div>
+                <div class="stat-lbl">Reject</div>
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button class="btn btn-start" id="btnStart">📹 Start Camera</button>
+            <button class="btn btn-capture" id="btnCapture">📸 Capture Master</button>
+            <button class="btn btn-test" id="btnTest">🔍 Inspect Glove</button>
+            <button class="btn btn-reset" id="btnReset">🔄 Reset</button>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('hiddenCanvas');
+        const badge = document.getElementById('badge');
+        const banner = document.getElementById('banner');
+        const matchEl = document.getElementById('matchEl');
+        const totalEl = document.getElementById('totalEl');
+        const passEl = document.getElementById('passEl');
+        const failEl = document.getElementById('failEl');
+        
+        const btnStart = document.getElementById('btnStart');
+        const btnCapture = document.getElementById('btnCapture');
+        const btnTest = document.getElementById('btnTest');
+        const btnReset = document.getElementById('btnReset');
+
+        let masterSignature = null;
+        let total = 0, passes = 0, fails = 0;
+
+        // 1. Start Camera
+        btnStart.addEventListener('click', async () => {
+            badge.textContent = "STARTING...";
+            badge.style.background = "#eab308";
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+                    audio: false
+                });
+                video.srcObject = stream;
+                await video.play();
+                
+                badge.textContent = "LIVE";
+                badge.style.background = "#22c55e";
+                badge.style.color = "#fff";
+                
+                btnStart.style.display = "none";
+                btnCapture.style.display = "block";
+                banner.textContent = "CAPTURE MASTER PRINT";
+            } catch (err) {
+                badge.textContent = "ERROR";
+                badge.style.background = "#ef4444";
+                alert("Camera Error: " + err.message);
+            }
+        });
+
+        // Helper to get image signature (color & brightness average)
+        function getSignature() {
+            if (!video.videoWidth) return null;
+            const ctx = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const w = Math.floor(canvas.width * 0.5);
+            const h = Math.floor(canvas.height * 0.4);
+            const x = Math.floor((canvas.width - w) / 2);
+            const y = Math.floor((canvas.height - h) / 2);
+            
+            const imgData = ctx.getImageData(x, y, w, h);
+            const data = imgData.data;
+            
+            let rSum = 0, gSum = 0, bSum = 0, count = 0;
+            for (let i = 0; i < data.length; i += 16) {
+                rSum += data[i];
+                gSum += data[i+1];
+                bSum += data[i+2];
+                count++;
+            }
+            return { r: rSum / count, g: gSum / count, b: bSum / count };
+        }
+
+        // 2. Capture Master
+        btnCapture.addEventListener('click', () => {
+            masterSignature = getSignature();
+            if (!masterSignature) {
+                alert("කැමරාව සූදානම් නැත!");
+                return;
+            }
+            banner.textContent = "MASTER CAPTURED ✅";
+            banner.className = "banner pass";
+            btnCapture.style.display = "none";
+            btnTest.style.display = "block";
+        });
+
+        // 3. Inspect Glove
+        btnTest.addEventListener('click', () => {
+            if (!masterSignature) return;
+            const currentSig = getSignature();
+            if (!currentSig) return;
+
+            const diffR = Math.abs(currentSig.r - masterSignature.r);
+            const diffG = Math.abs(currentSig.g - masterSignature.g);
+            const diffB = Math.abs(currentSig.b - masterSignature.b);
+            
+            const avgDiff = (diffR + diffG + diffB) / 3;
+            const score = Math.max(0, Math.round(100 - (avgDiff / 255 * 100 * 1.6)));
+            matchEl.textContent = score + "%";
+
+            total++;
+            totalEl.textContent = total;
+
+            // Threshold: 68%
+            if (score >= 68) {
+                passes++;
+                passEl.textContent = passes;
+                banner.className = "banner pass";
+                banner.textContent = `PASS / OK (${score}%)`;
+            } else {
+                fails++;
+                failEl.textContent = fails;
+                banner.className = "banner fail";
+                banner.textContent = `REJECT / FAIL (${score}%)`;
+            }
+        });
+
+        // 4. Reset Counters
+        btnReset.addEventListener('click', () => {
+            total = 0; passes = 0; fails = 0;
+            totalEl.textContent = "0";
+            passEl.textContent = "0";
+            failEl.textContent = "0";
+            matchEl.textContent = "--%";
+            if (masterSignature) {
+                banner.textContent = "READY FOR INSPECTION";
+                banner.className = "banner";
+            }
+        });
+    </script>
+</body>
+</html>
